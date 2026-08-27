@@ -63,7 +63,8 @@ jobs:
           node-version: "24"
           cache: "npm"
       - name: Install dependencies
-        run: npm ci
+        run: |
+          for i in 1 2 3; do npm ci && break || { echo "npm ci failed (attempt $i), retrying..."; sleep 5; }; done
       - name: Generate validation AOT
         run: node packages/protocol/scripts/generate-validation-aot.mjs
       - name: Build patched server
