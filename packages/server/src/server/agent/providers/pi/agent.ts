@@ -78,6 +78,7 @@ import type {
 } from "./rpc-types.js";
 import { PiUsagePoller, type PiUsagePollScheduler } from "./usage-poller.js";
 import {
+  mapTodoItemsFromToolResult,
   mapToolDetail,
   parseToolArgs,
   parseToolResult,
@@ -2329,6 +2330,17 @@ export class PiRpcAgentSession implements AgentSession {
       turnId,
       item,
     });
+    if (status === "completed") {
+      const todoItems = mapTodoItemsFromToolResult(result);
+      if (todoItems) {
+        this.emit({
+          type: "timeline",
+          provider: this.provider,
+          turnId,
+          item: { type: "todo", items: todoItems },
+        });
+      }
+    }
     return true;
   }
 
