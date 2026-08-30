@@ -199,11 +199,23 @@ SHERPA="$(ls -d "$APP_UNPACKED"/node_modules/sherpa-onnx-* 2>/dev/null | head -1
 PAT="{**/node-pty,**/$SHERPA,**/dist/daemon,**/terminal/shell-integration}/**"
 echo "Repacking (unpack: $PAT)..."
 if [[ "$USE_NPX_ASAR" -eq 1 ]]; then
-  npx --yes -p @electron/asar node -e "
+  # bulletproof local install in temp dir (immune to nvm/fnm/volta)
+  WORK_DIR=$(mktemp -d /tmp/paseo-asar-build.XXXXXX)
+  cat > "$WORK_DIR/swap.js" <<'EOS'
 const asar=require('@electron/asar');
-const T=process.argv[1], O=process.argv[2], PAT=process.argv[3];
-asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log('repack done')).catch(e=>{console.error(e);process.exit(1)});
-" "$TMP_TREE" "$TMP_OUT" "$PAT"
+const mmPath=require.resolve("minimatch",{paths:[require("node:path").dirname(require.resolve("@electron/asar/package.json"))]});
+const rawMM=require(mmPath);
+const wrapped=(f,p,o)=>rawMM(String(f).replace(/\\/g,"/"),p,o);
+for(const k of Object.keys(rawMM)) wrapped[k]=rawMM[k];
+require.cache[mmPath].exports=wrapped;
+try{ require.cache[require.resolve("minimatch")].exports=wrapped }catch{}
+const T=process.argv[2],O=process.argv[3],PAT=process.argv[4];
+asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log("repack done")).catch(e=>{console.error(e);process.exit(1)});
+EOS
+  (cd "$WORK_DIR" && npm init -y --silent >/dev/null 2>&1 && npm install @electron/asar --no-package-lock --no-fund --no-audit >/dev/null 2>&1 && node swap.js "$TMP_TREE" "$TMP_OUT" "$PAT")
+  REPACK_EXIT=$?
+  trash_system "$WORK_DIR" 2>/dev/null || rm -rf "$WORK_DIR"
+  if [[ "$REPACK_EXIT" -ne 0 ]]; then echo "Repack failed" >&2; exit 1; fi
 else
   node -e "
 const asar=require('@electron/asar');

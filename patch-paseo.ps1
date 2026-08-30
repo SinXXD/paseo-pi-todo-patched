@@ -210,8 +210,10 @@ Write-Host "Repacking (unpack: $Pat)..." -ForegroundColor DarkGray
 
 # repack with Windows backslash+dot-dir wrapper
 if ($UseNpxAsar) {
-  # standalone: use npx -p with inline node -e so require resolves via npx prefix (no temp file resolve issue)
-  $repackJs = @'
+  # standalone: bulletproof local install in temp dir (immune to nvm/fnm/volta symlink & PATH hijack)
+  $workDir = Join-Path $env:TEMP "paseo-asar-build-$(Get-Random)"
+  New-Item -ItemType Directory -Force -Path $workDir | Out-Null
+  $swapCode = @'
 const asar=require("@electron/asar");
 const mmPath=require.resolve("minimatch",{paths:[require("node:path").dirname(require.resolve("@electron/asar/package.json"))]});
 const rawMM=require(mmPath);
@@ -222,7 +224,15 @@ try{ require.cache[require.resolve("minimatch")].exports=wrapped }catch{}
 const T=process.argv[2],O=process.argv[3],PAT=process.argv[4];
 asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log("repack done")).catch(e=>{console.error(e);process.exit(1)});
 '@
-  $repackJs | npx --yes -p @electron/asar node --input-type=commonjs - "$TmpTree" "$TmpOut" "$Pat"
+  Set-Content -Path "$workDir/swap.js" -Value $swapCode -Encoding UTF8
+  Push-Location $workDir
+  npm init -y --silent 2>&1 | Out-Null
+  npm install @electron/asar --no-package-lock --no-fund --no-audit 2>&1 | Out-Null
+  node swap.js "$TmpTree" "$TmpOut" "$Pat"
+  $repackExit = $LASTEXITCODE
+  Pop-Location
+  Move-ToRecycleBin -Path $workDir; if (Test-Path $workDir) { Remove-Item $workDir -Recurse -Force -ErrorAction SilentlyContinue }
+  if ($repackExit -ne 0) { throw "Repack failed" }
 } else {
   $SwapMjs = Join-Path $RepoRoot "swap.mjs"
   if (-not (Test-Path $SwapMjs)) {
