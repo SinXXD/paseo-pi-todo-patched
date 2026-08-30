@@ -225,7 +225,8 @@ const PAT=process.argv[4]||"{**/node-pty,**/sherpa-onnx-win-x64,**/dist/daemon,*
 asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log("repack done")).catch(e=>{console.error(e);process.exit(1)});
 '@ | Set-Content -Path $SwapMjs -Encoding UTF8
 }
-node $SwapMjs $TmpTree $TmpOut $Pat
+if ($UseNpxAsar) { npx --yes -p @electron/asar node "$SwapMjs" "$TmpTree" "$TmpOut" "$Pat" }
+else { node "$SwapMjs" "$TmpTree" "$TmpOut" "$Pat" }
 if (-not (Test-Path $TmpOut)) { throw "Repack failed: $TmpOut not created" }
 if (-not (Test-Path "$TmpOut.unpacked")) { Write-Host "Note: unpacked dir not created (check PAT)" -ForegroundColor Yellow }
 
