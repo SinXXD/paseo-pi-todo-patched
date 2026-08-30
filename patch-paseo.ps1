@@ -210,29 +210,19 @@ Write-Host "Repacking (unpack: $Pat)..." -ForegroundColor DarkGray
 
 # repack with Windows backslash+dot-dir wrapper
 if ($UseNpxAsar) {
-  # standalone: run wrapper via npx -p so @electron/asar is resolvable in temp file
-  $Wrapper = Join-Path $env:TEMP "paseo-swap-$(Get-Random).mjs"
-  @'
-import {createRequire} from "node:module";
-const require=createRequire(import.meta.url);
-// npx -p makes asar resolvable from this temp file via NODE_PATH
-const mmPath=require.resolve("minimatch",{paths:[process.env.NODE_PATH || ""]});
-let rawMM; try{ rawMM=require(mmPath) }catch{ rawMM=require("minimatch") }
+  # standalone: use npx -p with inline node -e so require resolves via npx prefix (no temp file resolve issue)
+  $repackJs = @'
+const asar=require("@electron/asar");
+const mmPath=require.resolve("minimatch",{paths:[require("node:path").dirname(require.resolve("@electron/asar/package.json"))]});
+const rawMM=require(mmPath);
 const wrapped=(f,p,o)=>rawMM(String(f).replace(/\\/g,"/"),p,o);
 for(const k of Object.keys(rawMM)) wrapped[k]=rawMM[k];
-// patch the nested minimatch that @electron/asar will use
-try{
-  const asarPkg=require.resolve("@electron/asar/package.json");
-  const asarDir=require("node:path").dirname(asarPkg);
-  const nestedMm=require.resolve("minimatch",{paths:[asarDir]});
-  require.cache[nestedMm].exports=wrapped;
-} catch{}
+require.cache[mmPath].exports=wrapped;
 try{ require.cache[require.resolve("minimatch")].exports=wrapped }catch{}
-const asar=require("@electron/asar");
-const T=process.argv[2],O=process.argv[3],PAT=process.argv[4]||"{**/node-pty,**/sherpa-onnx-win-x64,**/dist/daemon,**/terminal/shell-integration}/**";
+const T=process.argv[2],O=process.argv[3],PAT=process.argv[4];
 asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log("repack done")).catch(e=>{console.error(e);process.exit(1)});
-'@ | Set-Content -Path $Wrapper -Encoding UTF8
-  npx --yes -p @electron/asar node "$Wrapper" "$TmpTree" "$TmpOut" "$Pat"
+'@
+  $repackJs | npx --yes -p @electron/asar node --input-type=commonjs - "$TmpTree" "$TmpOut" "$Pat"
 } else {
   $SwapMjs = Join-Path $RepoRoot "swap.mjs"
   if (-not (Test-Path $SwapMjs)) {
