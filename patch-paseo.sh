@@ -203,7 +203,7 @@ if [[ "$USE_NPX_ASAR" -eq 1 ]]; then
   WORK_DIR=$(mktemp -d /tmp/paseo-asar-build.XXXXXX)
   cat > "$WORK_DIR/swap.js" <<'EOS'
 const asar=require('@electron/asar');
-const mmPath=require.resolve("minimatch",{paths:[require("node:path").dirname(require.resolve("@electron/asar/package.json"))]});
+const mmPath=require.resolve("minimatch",{paths:[require("node:path").dirname(require.resolve("@electron/asar"))]});
 const rawMM=require(mmPath);
 const wrapped=(f,p,o)=>rawMM(String(f).replace(/\\/g,"/"),p,o);
 for(const k of Object.keys(rawMM)) wrapped[k]=rawMM[k];

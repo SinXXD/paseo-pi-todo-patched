@@ -215,7 +215,7 @@ if ($UseNpxAsar) {
   New-Item -ItemType Directory -Force -Path $workDir | Out-Null
   $swapCode = @'
 const asar=require("@electron/asar");
-const mmPath=require.resolve("minimatch",{paths:[require("node:path").dirname(require.resolve("@electron/asar/package.json"))]});
+const mmPath=require.resolve("minimatch",{paths:[require("node:path").dirname(require.resolve("@electron/asar"))]});
 const rawMM=require(mmPath);
 const wrapped=(f,p,o)=>rawMM(String(f).replace(/\\/g,"/"),p,o);
 for(const k of Object.keys(rawMM)) wrapped[k]=rawMM[k];
