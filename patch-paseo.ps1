@@ -180,10 +180,19 @@ if ($LASTEXITCODE -ne 0) { $global:LASTEXITCODE = 0 }
 # copy unpacked content back
 if (Test-Path $AppUnpacked) {
   Write-Host "Merging app.asar.unpacked..." -ForegroundColor DarkGray
-  # use tar if available (Git Bash), else Copy-Item
-  $tar = Get-Command tar -ErrorAction SilentlyContinue
-  if ($tar) { & tar -cf - -C $AppUnpacked . | & tar -xf - -C $TmpTree 2>&1 | Out-Null }
-  else { Copy-Item (Join-Path $AppUnpacked "*") -Destination $TmpTree -Recurse -Force }
+  # PowerShell pipeline corrupts binary tar stream, use robocopy/Copy-Item
+  try {
+    $robocopy = Get-Command robocopy -ErrorAction SilentlyContinue
+    if ($robocopy) {
+      & robocopy "$AppUnpacked" "$TmpTree" /E /NFL /NDL /NJH /NJS /R:0 /W:0 | Out-Null
+      if ($LASTEXITCODE -ge 8) { throw "robocopy exit $LASTEXITCODE" }
+      $global:LASTEXITCODE = 0
+    } else {
+      Copy-Item -Path (Join-Path $AppUnpacked "*") -Destination $TmpTree -Recurse -Force -ErrorAction Stop
+    }
+  } catch {
+    Copy-Item -Path (Join-Path $AppUnpacked "*") -Destination $TmpTree -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }
 # overwrite patched files
 $TargetDir = Join-Path $TmpTree "node_modules/@getpaseo/server/dist/server/server/agent/providers/pi"
