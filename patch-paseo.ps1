@@ -169,7 +169,14 @@ if (Test-Path $TmpTree) { Move-ToRecycleBin -Path $TmpTree; if (Test-Path $TmpTr
 New-Item -ItemType Directory -Path $TmpTree | Out-Null
 
 Write-Host "Extracting app.asar..." -ForegroundColor DarkGray
-if ($UseNpxAsar) { npx --yes @electron/asar extract $AppAsar $TmpTree 2>&1 | Out-Null } else { node $AsarBin extract $AppAsar $TmpTree 2>&1 | Out-Null }
+# asar extract always exits 1 for unpacked refs (expected), ignore it
+$prevEap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+try {
+  if ($UseNpxAsar) { npx --yes @electron/asar extract $AppAsar $TmpTree 2>&1 | Out-Null }
+  else { node $AsarBin extract $AppAsar $TmpTree 2>&1 | Out-Null }
+} catch {}
+$ErrorActionPreference = $prevEap
+if ($LASTEXITCODE -ne 0) { $global:LASTEXITCODE = 0 }
 # copy unpacked content back
 if (Test-Path $AppUnpacked) {
   Write-Host "Merging app.asar.unpacked..." -ForegroundColor DarkGray
