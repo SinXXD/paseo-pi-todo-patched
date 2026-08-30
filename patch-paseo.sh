@@ -46,6 +46,18 @@ find_repo_root() {
   done
   echo "Cannot locate repo root (tried ${cands[*]}). Use --repo-root." >&2; return 1
 }
+trash_system() {
+  local target="$1"
+  [[ -e "$target" ]] || return 0
+  if command -v gio >/dev/null 2>&1; then gio trash "$target" 2>/dev/null && return 0; fi
+  if command -v trash-put >/dev/null 2>&1; then trash-put "$target" 2>/dev/null && return 0; fi
+  if command -v kioclient5 >/dev/null 2>&1; then kioclient5 move "$target" trash:/ 2>/dev/null && return 0; fi
+  local trash_dir="${XDG_DATA_HOME:-$HOME/.local/share}/Trash/files"
+  mkdir -p "$trash_dir" 2>/dev/null
+  mv -f "$target" "$trash_dir/" 2>/dev/null && return 0
+  return 1
+}
+
 find_paseo_resources() {
   if [[ -n "$PASEO_RESOURCES" ]]; then
     if [[ -f "$PASEO_RESOURCES/app.asar" ]]; then echo "$PASEO_RESOURCES"; return 0; fi
@@ -124,7 +136,7 @@ fi
 
 # --- write permission check ---
 probe="$RESOURCES/__write_probe.tmp"
-if ! (echo ok > "$probe" 2>/dev/null && trash "$(cygpath -m "$probe")" 2>/dev/null || rm -f "$probe"); then
+if ! (echo ok > "$probe" 2>/dev/null && (trash_system "$probe" 2>/dev/null || rm -f "$probe")); then
   echo "No write permission for $RESOURCES - run with sudo: sudo $0 $*" >&2; exit 1
 fi
 
@@ -161,19 +173,19 @@ mkdir -p "$BACKUP_DIR"
 if [[ -f "$BACKUP_DIR/app.asar" && "$REDO_BACKUP" -eq 0 ]]; then
   echo "Backup exists, skipping (use --redo-backup to redo)"
 else
-  if [[ -d "$BACKUP_DIR" ]]; then trash "$(cygpath -m "$BACKUP_DIR")" 2>/dev/null || rm -rf "$BACKUP_DIR"; fi
+  if [[ -d "$BACKUP_DIR" ]]; then trash_system "$BACKUP_DIR" 2>/dev/null || rm -rf "$BACKUP_DIR"; fi
   mkdir -p "$BACKUP_DIR"
   cp -a "$APP_ASAR" "$BACKUP_DIR/"
   cp -a "$APP_UNPACKED" "$BACKUP_DIR/"
   echo "Backup -> $BACKUP_DIR"
 fi
 cp -f "$TMP_OUT" "$APP_ASAR"
-if [[ -d "$APP_UNPACKED" ]]; then trash "$(cygpath -m "$APP_UNPACKED")" 2>/dev/null || rm -rf "$APP_UNPACKED"; fi
+if [[ -d "$APP_UNPACKED" ]]; then trash_system "$APP_UNPACKED" 2>/dev/null || rm -rf "$APP_UNPACKED"; fi
 cp -a "$TMP_OUT.unpacked" "$APP_UNPACKED"
 echo "Deployed -> $RESOURCES"
 
 # verify
 if cmp -s "$APP_ASAR" "$TMP_OUT"; then echo "Verified (identical)"; else echo "Warning: hash mismatch"; fi
-trash "$(cygpath -m "$TMP_TREE")" 2>/dev/null || rm -rf "$TMP_TREE"
+trash_system "$TMP_TREE" 2>/dev/null || rm -rf "$TMP_TREE"
 echo "Done. Restart Paseo and test pi todo."
 echo "Rollback: bash $REPO_ROOT/patch-paseo.sh --help  # or restore manually from $BACKUP_DIR"

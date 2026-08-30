@@ -23,6 +23,30 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 
+# --- System recycle bin helper (no Node dependency) ---
+Add-Type -AssemblyName Microsoft.VisualBasic -ErrorAction SilentlyContinue
+function Move-ToRecycleBin {
+  param([string]$Path)
+  if (-not (Test-Path $Path)) { return }
+  try {
+    if (Test-Path $Path -PathType Container) {
+      [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($Path, 'OnlyErrorDialogs', 'SendToRecycleBin')
+    } else {
+      [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($Path, 'OnlyErrorDialogs', 'SendToRecycleBin')
+    }
+    return
+  } catch {}
+  # Fallback: Shell.Application verb
+  try {
+    $shell = New-Object -ComObject Shell.Application -ErrorAction Stop
+    $parent = Split-Path $Path -Parent
+    $leaf = Split-Path $Path -Leaf
+    $folder = $shell.Namespace($parent)
+    $item = $folder.ParseName($leaf)
+    if ($item) { $item.InvokeVerb("delete") }
+  } catch {}
+}
+
 function Find-RepoRoot {
   $candidates = @($PSScriptRoot, (Split-Path $PSScriptRoot -Parent))
   foreach ($c in $candidates) {
@@ -164,14 +188,14 @@ if ($procs.Count -gt 0 -and -not $Force) {
 }
 
 # --- write permission check ---
-try { $probe = Join-Path $Resources "__write_probe.tmp"; Set-Content -Path $probe -Value ok -ErrorAction Stop; $probeSlash = $probe.Replace('\','/'); trash "$probeSlash" 2>$null; if (Test-Path $probe) { Remove-Item $probe -Force -ErrorAction SilentlyContinue }; Write-Host "resources writable" -ForegroundColor DarkGray } catch {
+try { $probe = Join-Path $Resources "__write_probe.tmp"; Set-Content -Path $probe -Value ok -ErrorAction Stop; Move-ToRecycleBin -Path $probe; if (Test-Path $probe) { Remove-Item $probe -Force -ErrorAction SilentlyContinue }; Write-Host "resources writable" -ForegroundColor DarkGray } catch {
   Write-Host "No write permission for $Resources - run as administrator." -ForegroundColor Red; exit 1
 }
 
 # --- prepare temp tree ---
 $TmpTree = Join-Path $env:TEMP "paseo-asar-tree-$(Get-Random)"
 $TmpOut = Join-Path $RepoRoot "out-patched.asar"
-if (Test-Path $TmpTree) { $tmpSlash = $TmpTree.Replace('\','/'); trash "$tmpSlash" 2>$null; if (Test-Path $TmpTree) { Remove-Item $TmpTree -Recurse -Force -ErrorAction SilentlyContinue } }
+if (Test-Path $TmpTree) { Move-ToRecycleBin -Path $TmpTree; if (Test-Path $TmpTree) { Remove-Item $TmpTree -Recurse -Force -ErrorAction SilentlyContinue } }
 New-Item -ItemType Directory -Path $TmpTree | Out-Null
 
 Write-Host "Extracting app.asar..." -ForegroundColor DarkGray
@@ -225,13 +249,13 @@ $bakAsar = Join-Path $BackupDir "app.asar"
 if ((Test-Path $bakAsar) -and -not $RedoBackup) {
   Write-Host "Backup exists, skipping (use -RedoBackup to redo)" -ForegroundColor Yellow
 } else {
-  if (Test-Path $BackupDir) { $bakSlash = $BackupDir.Replace('\','/'); trash "$bakSlash" 2>$null; if (Test-Path $BackupDir) { Remove-Item $BackupDir -Recurse -Force -ErrorAction SilentlyContinue }; New-Item -ItemType Directory -Path $BackupDir | Out-Null }
+  if (Test-Path $BackupDir) { Move-ToRecycleBin -Path $BackupDir; if (Test-Path $BackupDir) { Remove-Item $BackupDir -Recurse -Force -ErrorAction SilentlyContinue }; New-Item -ItemType Directory -Path $BackupDir | Out-Null }
   Copy-Item $AppAsar -Destination $BackupDir
   Copy-Item $AppUnpacked -Destination $BackupDir -Recurse
   Write-Host "Backup -> $BackupDir"
 }
 Copy-Item $TmpOut -Destination $AppAsar -Force
-if (Test-Path $AppUnpacked) { $upSlash = $AppUnpacked.Replace('\','/'); trash "$upSlash" 2>$null; if (Test-Path $AppUnpacked) { Remove-Item $AppUnpacked -Recurse -Force -ErrorAction SilentlyContinue } }
+if (Test-Path $AppUnpacked) { Move-ToRecycleBin -Path $AppUnpacked; if (Test-Path $AppUnpacked) { Remove-Item $AppUnpacked -Recurse -Force -ErrorAction SilentlyContinue } }
 Copy-Item "$TmpOut.unpacked" -Destination $AppUnpacked -Recurse
 Write-Host "Deployed -> $Resources" -ForegroundColor Green
 
@@ -239,6 +263,6 @@ Write-Host "Deployed -> $Resources" -ForegroundColor Green
 $h1=(Get-FileHash $AppAsar -Algorithm SHA256).Hash; $h2=(Get-FileHash $TmpOut -Algorithm SHA256).Hash
 if ($h1 -eq $h2) { Write-Host "Verified (hash match)" -ForegroundColor Green } else { Write-Host "Warning: hash mismatch" -ForegroundColor Red }
 
-$tmpSlash2 = $TmpTree.Replace('\','/'); trash "$tmpSlash2" 2>$null; if (Test-Path $TmpTree) { Remove-Item $TmpTree -Recurse -Force -ErrorAction SilentlyContinue }
+Move-ToRecycleBin -Path $TmpTree; if (Test-Path $TmpTree) { Remove-Item $TmpTree -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host "Done. Restart Paseo and test pi todo." -ForegroundColor Green
 Write-Host "Rollback: powershell -ExecutionPolicy Bypass -File $RepoRoot/restore.ps1" -ForegroundColor DarkGray
