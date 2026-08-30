@@ -358,7 +358,7 @@ export function mapTodoItemsFromToolResult(result?: PiToolResult): AgentTaskItem
         ? details.todos
         : undefined
     : undefined;
-  if (!Array.isArray(rawTodos) || rawTodos.length === 0) return null;
+  if (!Array.isArray(rawTodos)) return null;
   const items: AgentTaskItem[] = [];
   for (const raw of rawTodos) {
     if (!isRecord(raw)) continue;
@@ -375,7 +375,7 @@ export function mapTodoItemsFromToolResult(result?: PiToolResult): AgentTaskItem
       status: done ? ("completed" as const) : ("pending" as const),
     });
   }
-  return items.length > 0 ? items : null;
+  return items;
 }
 
 export function mapToolDetail(toolCall: PiTrackedToolCall, result?: PiToolResult): ToolCallDetail {

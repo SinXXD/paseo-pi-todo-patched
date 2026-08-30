@@ -1,5 +1,5 @@
 diff --git a/packages/server/src/server/agent/providers/pi/agent.ts b/packages/server/src/server/agent/providers/pi/agent.ts
-index 9251c682d..bf9f95378 100644
+index 9251c682d..df63d91b9 100644
 --- a/packages/server/src/server/agent/providers/pi/agent.ts
 +++ b/packages/server/src/server/agent/providers/pi/agent.ts
 @@ -78,6 +78,7 @@ import type {
@@ -10,26 +10,24 @@ index 9251c682d..bf9f95378 100644
    mapToolDetail,
    parseToolArgs,
    parseToolResult,
-@@ -2329,6 +2330,17 @@ export class PiRpcAgentSession implements AgentSession {
+@@ -2329,6 +2330,15 @@ export class PiRpcAgentSession implements AgentSession {
        turnId,
        item,
      });
-+    if (status === "completed") {
-+      const todoItems = mapTodoItemsFromToolResult(result);
-+      if (todoItems) {
-+        this.emit({
-+          type: "timeline",
-+          provider: this.provider,
-+          turnId,
-+          item: { type: "todo", items: todoItems },
-+        });
-+      }
++    const todoItems = mapTodoItemsFromToolResult(result);
++    if (todoItems) {
++      this.emit({
++        type: "timeline",
++        provider: this.provider,
++        turnId,
++        item: { type: "todo", items: todoItems },
++      });
 +    }
      return true;
    }
  
 diff --git a/packages/server/src/server/agent/providers/pi/tool-call-mapper.ts b/packages/server/src/server/agent/providers/pi/tool-call-mapper.ts
-index 499627377..2bf13b706 100644
+index 499627377..388c6c663 100644
 --- a/packages/server/src/server/agent/providers/pi/tool-call-mapper.ts
 +++ b/packages/server/src/server/agent/providers/pi/tool-call-mapper.ts
 @@ -1,6 +1,6 @@
@@ -79,7 +77,7 @@ index 499627377..2bf13b706 100644
 +        ? details.todos
 +        : undefined
 +    : undefined;
-+  if (!Array.isArray(rawTodos) || rawTodos.length === 0) return null;
++  if (!Array.isArray(rawTodos)) return null;
 +  const items: AgentTaskItem[] = [];
 +  for (const raw of rawTodos) {
 +    if (!isRecord(raw)) continue;
@@ -96,7 +94,7 @@ index 499627377..2bf13b706 100644
 +      status: done ? ("completed" as const) : ("pending" as const),
 +    });
 +  }
-+  return items.length > 0 ? items : null;
++  return items;
 +}
 +
  export function mapToolDetail(toolCall: PiTrackedToolCall, result?: PiToolResult): ToolCallDetail {

@@ -2330,16 +2330,14 @@ export class PiRpcAgentSession implements AgentSession {
       turnId,
       item,
     });
-    if (status === "completed") {
-      const todoItems = mapTodoItemsFromToolResult(result);
-      if (todoItems) {
-        this.emit({
-          type: "timeline",
-          provider: this.provider,
-          turnId,
-          item: { type: "todo", items: todoItems },
-        });
-      }
+    const todoItems = mapTodoItemsFromToolResult(result);
+    if (todoItems) {
+      this.emit({
+        type: "timeline",
+        provider: this.provider,
+        turnId,
+        item: { type: "todo", items: todoItems },
+      });
     }
     return true;
   }
