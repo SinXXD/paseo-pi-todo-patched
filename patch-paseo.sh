@@ -124,7 +124,7 @@ fi
 
 # --- write permission check ---
 probe="$RESOURCES/__write_probe.tmp"
-if ! (echo ok > "$probe" 2>/dev/null && rm -f "$probe"); then
+if ! (echo ok > "$probe" 2>/dev/null && trash "$(cygpath -m "$probe")" 2>/dev/null || rm -f "$probe"); then
   echo "No write permission for $RESOURCES - run with sudo: sudo $0 $*" >&2; exit 1
 fi
 
@@ -161,19 +161,19 @@ mkdir -p "$BACKUP_DIR"
 if [[ -f "$BACKUP_DIR/app.asar" && "$REDO_BACKUP" -eq 0 ]]; then
   echo "Backup exists, skipping (use --redo-backup to redo)"
 else
-  rm -rf "$BACKUP_DIR"
+  if [[ -d "$BACKUP_DIR" ]]; then trash "$(cygpath -m "$BACKUP_DIR")" 2>/dev/null || rm -rf "$BACKUP_DIR"; fi
   mkdir -p "$BACKUP_DIR"
   cp -a "$APP_ASAR" "$BACKUP_DIR/"
   cp -a "$APP_UNPACKED" "$BACKUP_DIR/"
   echo "Backup -> $BACKUP_DIR"
 fi
 cp -f "$TMP_OUT" "$APP_ASAR"
-rm -rf "$APP_UNPACKED"
+if [[ -d "$APP_UNPACKED" ]]; then trash "$(cygpath -m "$APP_UNPACKED")" 2>/dev/null || rm -rf "$APP_UNPACKED"; fi
 cp -a "$TMP_OUT.unpacked" "$APP_UNPACKED"
 echo "Deployed -> $RESOURCES"
 
 # verify
 if cmp -s "$APP_ASAR" "$TMP_OUT"; then echo "Verified (identical)"; else echo "Warning: hash mismatch"; fi
-rm -rf "$TMP_TREE"
+trash "$(cygpath -m "$TMP_TREE")" 2>/dev/null || rm -rf "$TMP_TREE"
 echo "Done. Restart Paseo and test pi todo."
 echo "Rollback: bash $REPO_ROOT/patch-paseo.sh --help  # or restore manually from $BACKUP_DIR"

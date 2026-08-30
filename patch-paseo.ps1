@@ -107,6 +107,55 @@ if ($needsBuild) {
   Write-Host "Using existing dist (skip build)" -ForegroundColor DarkGray
 }
 
+# --- try to fetch prebuilt patched files for this Paseo version (from patch repo release) ---
+$PaseoVersion = $null
+try {
+  $escAppAsar = $AppAsar -replace "'", "''"
+  $verJson = node -e "try{const a=require('@electron/asar'); const d=a.extractFile('$escAppAsar','package.json'); console.log(JSON.parse(d.toString()).version)}catch(e){}" 2>$null
+  $verJson = "$verJson".Trim()
+  if ($verJson) { $PaseoVersion = $verJson }
+} catch {}
+if (-not $PaseoVersion) {
+  try {
+    $exe = Join-Path (Split-Path $Resources -Parent) "Paseo.exe"
+    if (Test-Path $exe) { $v = (Get-Item $exe).VersionInfo.FileVersion; if ($v) { $PaseoVersion = $v.Trim() } }
+  } catch {}
+}
+if ($PaseoVersion) {
+  # normalize: keep e.g. 0.6.1, strip leading v
+  $normVer = $PaseoVersion -replace '^v',''
+  Write-Host "Detected Paseo version: $normVer" -ForegroundColor Cyan
+  $releaseTag = "patched-v$normVer"
+  $baseUrl = "https://github.com/SinXXD/paseo-pi-todo-patched/releases/download/$releaseTag"
+  $tmpAgent = Join-Path $env:TEMP "paseo-patched-agent-$normVer.js"
+  $tmpMapper = Join-Path $env:TEMP "paseo-patched-mapper-$normVer.js"
+  $fetched = $false
+  try {
+    Write-Host "Trying to fetch prebuilt patch $releaseTag from GitHub..." -ForegroundColor DarkGray
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if ($gh) {
+      & gh release download $releaseTag --repo SinXXD/paseo-pi-todo-patched --pattern "agent.js" --dir $env:TEMP --clobber 2>&1 | Out-Null
+      & gh release download $releaseTag --repo SinXXD/paseo-pi-todo-patched --pattern "tool-call-mapper.js" --dir $env:TEMP --clobber 2>&1 | Out-Null
+      if (Test-Path "$env:TEMP/agent.js") { Move-Item "$env:TEMP/agent.js" $tmpAgent -Force }
+      if (Test-Path "$env:TEMP/tool-call-mapper.js") { Move-Item "$env:TEMP/tool-call-mapper.js" $tmpMapper -Force }
+    }
+    if (-not (Test-Path $tmpAgent)) {
+      Invoke-WebRequest -Uri "$baseUrl/agent.js" -OutFile $tmpAgent -UseBasicParsing -ErrorAction Stop
+      Invoke-WebRequest -Uri "$baseUrl/tool-call-mapper.js" -OutFile $tmpMapper -UseBasicParsing -ErrorAction Stop
+    }
+    if ((Test-Path $tmpAgent) -and (Test-Path $tmpMapper)) {
+      Write-Host "Fetched prebuilt patch for v$normVer ($releaseTag)" -ForegroundColor Green
+      $AgentDist = $tmpAgent
+      $MapperDist = $tmpMapper
+    } else { throw "download incomplete" }
+    $fetched = $true
+  } catch {
+    Write-Host "No prebuilt release for v$normVer ($releaseTag), will use local build. ($($_.Exception.Message))" -ForegroundColor Yellow
+  }
+} else {
+  Write-Host "Could not detect Paseo version, using local build" -ForegroundColor Yellow
+}
+
 # --- Paseo running check ---
 $procs = @(Get-Process -Name 'Paseo' -ErrorAction SilentlyContinue)
 if ($procs.Count -gt 0 -and -not $Force) {
@@ -115,14 +164,14 @@ if ($procs.Count -gt 0 -and -not $Force) {
 }
 
 # --- write permission check ---
-try { $probe = Join-Path $Resources "__write_probe.tmp"; Set-Content -Path $probe -Value ok -ErrorAction Stop; Remove-Item $probe -Force; Write-Host "resources writable" -ForegroundColor DarkGray } catch {
+try { $probe = Join-Path $Resources "__write_probe.tmp"; Set-Content -Path $probe -Value ok -ErrorAction Stop; $probeSlash = $probe.Replace('\','/'); trash "$probeSlash" 2>$null; if (Test-Path $probe) { Remove-Item $probe -Force -ErrorAction SilentlyContinue }; Write-Host "resources writable" -ForegroundColor DarkGray } catch {
   Write-Host "No write permission for $Resources - run as administrator." -ForegroundColor Red; exit 1
 }
 
 # --- prepare temp tree ---
 $TmpTree = Join-Path $env:TEMP "paseo-asar-tree-$(Get-Random)"
 $TmpOut = Join-Path $RepoRoot "out-patched.asar"
-if (Test-Path $TmpTree) { Remove-Item $TmpTree -Recurse -Force }
+if (Test-Path $TmpTree) { $tmpSlash = $TmpTree.Replace('\','/'); trash "$tmpSlash" 2>$null; if (Test-Path $TmpTree) { Remove-Item $TmpTree -Recurse -Force -ErrorAction SilentlyContinue } }
 New-Item -ItemType Directory -Path $TmpTree | Out-Null
 
 Write-Host "Extracting app.asar..." -ForegroundColor DarkGray
@@ -176,13 +225,13 @@ $bakAsar = Join-Path $BackupDir "app.asar"
 if ((Test-Path $bakAsar) -and -not $RedoBackup) {
   Write-Host "Backup exists, skipping (use -RedoBackup to redo)" -ForegroundColor Yellow
 } else {
-  if (Test-Path $BackupDir) { Remove-Item $BackupDir -Recurse -Force; New-Item -ItemType Directory -Path $BackupDir | Out-Null }
+  if (Test-Path $BackupDir) { $bakSlash = $BackupDir.Replace('\','/'); trash "$bakSlash" 2>$null; if (Test-Path $BackupDir) { Remove-Item $BackupDir -Recurse -Force -ErrorAction SilentlyContinue }; New-Item -ItemType Directory -Path $BackupDir | Out-Null }
   Copy-Item $AppAsar -Destination $BackupDir
   Copy-Item $AppUnpacked -Destination $BackupDir -Recurse
   Write-Host "Backup -> $BackupDir"
 }
 Copy-Item $TmpOut -Destination $AppAsar -Force
-if (Test-Path $AppUnpacked) { Remove-Item $AppUnpacked -Recurse -Force }
+if (Test-Path $AppUnpacked) { $upSlash = $AppUnpacked.Replace('\','/'); trash "$upSlash" 2>$null; if (Test-Path $AppUnpacked) { Remove-Item $AppUnpacked -Recurse -Force -ErrorAction SilentlyContinue } }
 Copy-Item "$TmpOut.unpacked" -Destination $AppUnpacked -Recurse
 Write-Host "Deployed -> $Resources" -ForegroundColor Green
 
@@ -190,6 +239,6 @@ Write-Host "Deployed -> $Resources" -ForegroundColor Green
 $h1=(Get-FileHash $AppAsar -Algorithm SHA256).Hash; $h2=(Get-FileHash $TmpOut -Algorithm SHA256).Hash
 if ($h1 -eq $h2) { Write-Host "Verified (hash match)" -ForegroundColor Green } else { Write-Host "Warning: hash mismatch" -ForegroundColor Red }
 
-Remove-Item $TmpTree -Recurse -Force -ErrorAction SilentlyContinue
+$tmpSlash2 = $TmpTree.Replace('\','/'); trash "$tmpSlash2" 2>$null; if (Test-Path $TmpTree) { Remove-Item $TmpTree -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host "Done. Restart Paseo and test pi todo." -ForegroundColor Green
 Write-Host "Rollback: powershell -ExecutionPolicy Bypass -File $RepoRoot/restore.ps1" -ForegroundColor DarkGray
