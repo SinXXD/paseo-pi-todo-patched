@@ -1,13 +1,6 @@
 name: Build Patched Release
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "packages/server/src/server/agent/providers/pi/**"
-      - ".github/workflows/build-patched-release.yml"
-      - "patches/**"
-      - "patch-paseo.*"
   workflow_dispatch:
   schedule:
     - cron: "0 2 * * *"
@@ -143,15 +136,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Auto Release on main push
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          TAG="patched-$(date +%Y%m%d)-${{ github.run_number }}"
-          echo "Creating release $TAG"
-          gh release create "$TAG" \
-            --title "Patched build $TAG" \
-            --notes "Auto-built from main at ${{ github.sha }}. Includes pi todo patch (details.tasks/todos compatible)." \
-            packages/server/dist/server/server/agent/providers/pi/agent.js \
-            packages/server/dist/server/server/agent/providers/pi/tool-call-mapper.js || echo "Release creation skipped or failed"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
