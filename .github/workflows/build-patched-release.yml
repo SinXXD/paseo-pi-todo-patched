@@ -6,9 +6,10 @@ on:
     paths:
       - "packages/server/src/server/agent/providers/pi/**"
       - ".github/workflows/build-patched-release.yml"
+      - "patches/**"
+      - "patch-paseo.*"
   workflow_dispatch:
   schedule:
-    # daily upstream sync at 02:00 UTC
     - cron: "0 2 * * *"
 
 permissions:
@@ -16,85 +17,108 @@ permissions:
   actions: read
 
 jobs:
-  sync-upstream:
-    if: github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-      - name: Sync from upstream getpaseo/paseo
-        run: |
-          git remote add upstream https://github.com/getpaseo/paseo.git || true
-          git fetch upstream main --prune
-          echo "Upstream HEAD: $(git rev-parse upstream/main)"
-          echo "Local HEAD: $(git rev-parse HEAD)"
-          if git merge-base --is-ancestor HEAD upstream/main; then
-            echo "Already up-to-date or behind, attempting merge"
-            if git merge --no-edit upstream/main; then
-              git push origin main || echo "Push failed - may need manual resolution"
-            else
-              echo "Merge conflict - aborting sync, manual intervention needed"
-              git merge --abort || true
-              # Create an issue or PR for manual conflict resolution could be added here
-              exit 0
-            fi
-          else
-            echo "Local is ahead of upstream, skip sync"
-          fi
-
   build-and-release:
-    needs: sync-upstream
-    if: always() && (needs.sync-upstream.result == 'success' || needs.sync-upstream.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout (with tags)
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+          fetch-tags: true
+
+      - name: Handle release-tag pinning (schedule)
+        if: github.event_name == 'schedule'
+        id: release_tag
+        run: |
+          LATEST=$(gh api repos/getpaseo/paseo/releases/latest --jq .tag_name)
+          echo "latest_tag=$LATEST" >> $GITHUB_OUTPUT
+          echo "Latest upstream release: $LATEST"
+          # check if we already released patched-$LATEST
+          if gh release view "patched-$LATEST" --repo ${{ github.repository }} >/dev/null 2>&1; then
+            echo "needs_build=false" >> $GITHUB_OUTPUT
+            echo "Already have patched-$LATEST, skipping"
+          else
+            echo "needs_build=true" >> $GITHUB_OUTPUT
+            echo "Need to build patched-$LATEST"
+          fi
+          # checkout the upstream release tag
+          git fetch origin tag "$LATEST" --no-tags 2>&1 | head -5 || git fetch --tags origin 2>&1 | tail -5
+          # also fetch upstream tags directly (in case origin is our fork)
+          git remote add upstream https://github.com/getpaseo/paseo.git 2>/dev/null || true
+          git fetch upstream tag "$LATEST" --no-tags 2>&1 | head -5 || true
+          # try to find tag locally
+          if git rev-parse "$LATEST" >/dev/null 2>&1; then
+            echo "Found tag $LATEST locally"
+          elif git rev-parse "upstream/$LATEST" >/dev/null 2>&1; then
+            LATEST="upstream/$LATEST"
+          fi
+          echo "checkout_tag=$LATEST" >> $GITHUB_OUTPUT
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout upstream release tag and apply patch (schedule)
+        if: github.event_name == 'schedule' && steps.release_tag.outputs.needs_build == 'true'
+        run: |
+          TAG="${{ steps.release_tag.outputs.checkout_tag }}"
+          echo "Checking out $TAG"
+          git checkout -B "patched-$TAG" "$TAG" 2>&1 | head -5
+          echo "Applying pi-todo patch"
+          if [[ -f patches/pi-todo.patch ]]; then
+            git apply patches/pi-todo.patch && echo "Patch applied"
+          else
+            echo "Patch file not found, cherry-picking from main"
+            git cherry-pick origin/main --no-commit 2>&1 | head -20 || true
+          fi
+          git status --short | head -20
+
+      - name: Setup Node
+        if: github.event_name != 'schedule' || steps.release_tag.outputs.needs_build == 'true'
+        uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: "npm"
+
       - name: Install dependencies
+        if: github.event_name != 'schedule' || steps.release_tag.outputs.needs_build == 'true'
         run: |
           for i in 1 2 3; do npm ci && break || { echo "npm ci failed (attempt $i), retrying..."; sleep 5; }; done
+
       - name: Generate validation AOT
+        if: github.event_name != 'schedule' || steps.release_tag.outputs.needs_build == 'true'
         run: node packages/protocol/scripts/generate-validation-aot.mjs
+
       - name: Build patched server
+        if: github.event_name != 'schedule' || steps.release_tag.outputs.needs_build == 'true'
         run: |
           npm run build --workspace=@getpaseo/protocol
           npm run build --workspace=@getpaseo/highlight
           npm run build --workspace=@getpaseo/relay
           npm run build --workspace=@getpaseo/client
-          npm run build --workspace=@getpaseo/plugin
+          npm run build --workspace=@getpaseo/plugin 2>&1 | tail -3 || npx tsc -p packages/plugin/tsconfig.json --incremental false
           npm run build --workspace=@getpaseo/server
           echo "Build done"
-      - name: Verify patch is present
+
+      - name: Verify patch
+        if: github.event_name != 'schedule' || steps.release_tag.outputs.needs_build == 'true'
         run: |
-          echo "=== agent.js ==="
           grep -c "mapTodoItemsFromToolResult" packages/server/dist/server/server/agent/providers/pi/agent.js
           grep -q 'type: "todo"' packages/server/dist/server/server/agent/providers/pi/agent.js && echo "todo event OK"
-          echo "=== tool-call-mapper.js ==="
           grep -q "details.tasks" packages/server/dist/server/server/agent/providers/pi/tool-call-mapper.js && echo "tasks compat OK"
           grep -q "details.todos" packages/server/dist/server/server/agent/providers/pi/tool-call-mapper.js && echo "todos compat OK"
+
       - name: Upload patched artifacts
+        if: github.event_name != 'schedule' || steps.release_tag.outputs.needs_build == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: patched-server-pi-${{ github.run_number }}
+          name: patched-server-${{ github.event_name == 'schedule' && steps.release_tag.outputs.latest_tag || 'main' }}-${{ github.run_number }}
           path: |
             packages/server/dist/server/server/agent/providers/pi/agent.js
             packages/server/dist/server/server/agent/providers/pi/tool-call-mapper.js
             packages/server/dist/server/server/agent/providers/pi/agent.d.ts
             packages/server/dist/server/server/agent/providers/pi/tool-call-mapper.d.ts
           retention-days: 30
-      - name: Create Release (on tag or manual dispatch)
+
+      - name: Create Release (tag / dispatch)
         if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
@@ -104,6 +128,21 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release for upstream tag (schedule)
+        if: github.event_name == 'schedule' && steps.release_tag.outputs.needs_build == 'true'
+        run: |
+          LATEST="${{ steps.release_tag.outputs.latest_tag }}"
+          TAG="patched-$LATEST"
+          echo "Creating release $TAG"
+          gh release create "$TAG" \
+            --title "Patched $LATEST" \
+            --notes "Auto-built from upstream $LATEST at ${{ github.sha }}. Includes pi todo patch (details.tasks/todos compatible)." \
+            packages/server/dist/server/server/agent/providers/pi/agent.js \
+            packages/server/dist/server/server/agent/providers/pi/tool-call-mapper.js
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Auto Release on main push
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |

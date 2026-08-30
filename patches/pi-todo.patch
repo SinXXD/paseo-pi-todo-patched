@@ -1,0 +1,104 @@
+diff --git a/packages/server/src/server/agent/providers/pi/agent.ts b/packages/server/src/server/agent/providers/pi/agent.ts
+index 9251c682d..bf9f95378 100644
+--- a/packages/server/src/server/agent/providers/pi/agent.ts
++++ b/packages/server/src/server/agent/providers/pi/agent.ts
+@@ -78,6 +78,7 @@ import type {
+ } from "./rpc-types.js";
+ import { PiUsagePoller, type PiUsagePollScheduler } from "./usage-poller.js";
+ import {
++  mapTodoItemsFromToolResult,
+   mapToolDetail,
+   parseToolArgs,
+   parseToolResult,
+@@ -2329,6 +2330,17 @@ export class PiRpcAgentSession implements AgentSession {
+       turnId,
+       item,
+     });
++    if (status === "completed") {
++      const todoItems = mapTodoItemsFromToolResult(result);
++      if (todoItems) {
++        this.emit({
++          type: "timeline",
++          provider: this.provider,
++          turnId,
++          item: { type: "todo", items: todoItems },
++        });
++      }
++    }
+     return true;
+   }
+ 
+diff --git a/packages/server/src/server/agent/providers/pi/tool-call-mapper.ts b/packages/server/src/server/agent/providers/pi/tool-call-mapper.ts
+index 499627377..2bf13b706 100644
+--- a/packages/server/src/server/agent/providers/pi/tool-call-mapper.ts
++++ b/packages/server/src/server/agent/providers/pi/tool-call-mapper.ts
+@@ -1,6 +1,6 @@
+ import { z } from "zod";
+ 
+-import type { ToolCallDetail } from "../../agent-sdk-types.js";
++import type { AgentTaskItem, ToolCallDetail } from "../../agent-sdk-types.js";
+ 
+ interface BashToolInput {
+   command: string;
+@@ -57,6 +57,15 @@ interface PiToolResultObject {
+   details?: PiToolResultDetails;
+ }
+ 
++interface PiTodoResultDetail {
++  id?: number | string;
++  text?: string;
++  done?: boolean;
++  // pi 0.84.x built-in todo tool shape (details.tasks)
++  subject?: string;
++  status?: string;
++}
++
+ interface PiToolResultDetails {
+   diff?: string;
+   mode?: string;
+@@ -64,6 +73,8 @@ interface PiToolResultDetails {
+   tool?: string;
+   mcpResult?: unknown;
+   xdev?: unknown;
++  /** Structured todo-list state carried by pi's `todo` tool */
++  todos?: PiTodoResultDetail[];
+ }
+ 
+ interface PiToolResultTextContent {
+@@ -337,6 +348,36 @@ export function resolveToolCallName(toolCall: PiTrackedToolCall, result?: PiTool
+   return toolCall.toolName;
+ }
+ 
++export function mapTodoItemsFromToolResult(result?: PiToolResult): AgentTaskItem[] | null {
++  const details = result && typeof result !== "string" ? result.details : undefined;
++  // 兼容两套结构: pi 内置 todo(details.tasks, subject/status) 与 pi-deck-todo 扩展(details.todos, text/done)
++  const rawTodos = isRecord(details)
++    ? Array.isArray(details.tasks)
++      ? details.tasks
++      : Array.isArray(details.todos)
++        ? details.todos
++        : undefined
++    : undefined;
++  if (!Array.isArray(rawTodos) || rawTodos.length === 0) return null;
++  const items: AgentTaskItem[] = [];
++  for (const raw of rawTodos) {
++    if (!isRecord(raw)) continue;
++    const text = readNonEmptyString(raw.text) ?? readNonEmptyString(raw.subject);
++    if (!text) continue;
++    const done =
++      raw.done === true ||
++      (typeof raw.status === "string" && raw.status === "completed");
++    const id = raw.id !== undefined && raw.id !== null ? String(raw.id) : undefined;
++    items.push({
++      text,
++      ...(id ? { id } : {}),
++      completed: done,
++      status: done ? ("completed" as const) : ("pending" as const),
++    });
++  }
++  return items.length > 0 ? items : null;
++}
++
+ export function mapToolDetail(toolCall: PiTrackedToolCall, result?: PiToolResult): ToolCallDetail {
+   const parsedResult = result ?? null;
+ 
