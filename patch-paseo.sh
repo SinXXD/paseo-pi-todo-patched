@@ -245,5 +245,8 @@ echo "Deployed -> $RESOURCES"
 # verify
 if cmp -s "$APP_ASAR" "$TMP_OUT"; then echo "Verified (identical)"; else echo "Warning: hash mismatch"; fi
 trash_system "$TMP_TREE" 2>/dev/null || rm -rf "$TMP_TREE"
+# cleanup repacked temp outputs
+[[ -f "$TMP_OUT" ]] && (trash_system "$TMP_OUT" 2>/dev/null || rm -f "$TMP_OUT")
+[[ -d "$TMP_OUT.unpacked" ]] && (trash_system "$TMP_OUT.unpacked" 2>/dev/null || rm -rf "$TMP_OUT.unpacked")
 echo "Done. Restart Paseo and test pi todo."
 echo "Rollback: bash $REPO_ROOT/patch-paseo.sh --help  # or restore manually from $BACKUP_DIR"

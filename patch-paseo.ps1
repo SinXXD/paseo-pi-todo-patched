@@ -275,5 +275,8 @@ $h1=(Get-FileHash $AppAsar -Algorithm SHA256).Hash; $h2=(Get-FileHash $TmpOut -A
 if ($h1 -eq $h2) { Write-Host "Verified (hash match)" -ForegroundColor Green } else { Write-Host "Warning: hash mismatch" -ForegroundColor Red }
 
 Move-ToRecycleBin -Path $TmpTree; if (Test-Path $TmpTree) { Remove-Item $TmpTree -Recurse -Force -ErrorAction SilentlyContinue }
+# cleanup repacked temp outputs
+if (Test-Path $TmpOut) { Move-ToRecycleBin -Path $TmpOut; if (Test-Path $TmpOut) { Remove-Item $TmpOut -Force -ErrorAction SilentlyContinue } }
+if (Test-Path "$TmpOut.unpacked") { Move-ToRecycleBin -Path "$TmpOut.unpacked"; if (Test-Path "$TmpOut.unpacked") { Remove-Item "$TmpOut.unpacked" -Recurse -Force -ErrorAction SilentlyContinue } }
 Write-Host "Done. Restart Paseo and test pi todo." -ForegroundColor Green
 Write-Host "Rollback: powershell -ExecutionPolicy Bypass -File $RepoRoot/restore.ps1" -ForegroundColor DarkGray
