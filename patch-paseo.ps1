@@ -53,7 +53,9 @@ function Find-RepoRoot {
     if (Test-Path (Join-Path $c "packages/server/src/server/agent/providers/pi/agent.ts")) { return $c }
   }
   if ($RepoRoot -and (Test-Path $RepoRoot)) { return $RepoRoot }
-  throw "Cannot locate paseo repo root (tried $candidates). Use -RepoRoot."
+  # standalone mode: no repo needed when fetching from Release, use script dir or TEMP
+  Write-Host "Repo not found, running in standalone mode (fetch from Release)" -ForegroundColor DarkGray
+  return $PSScriptRoot
 }
 function Find-PaseoResources {
   param([string]$Custom)
@@ -90,11 +92,13 @@ $AppAsar = Join-Path $Resources "app.asar"
 $AppUnpacked = Join-Path $Resources "app.asar.unpacked"
 $BackupDir = Join-Path $RepoRoot "paseo-asar-backup"
 
-# --- ensure @electron/asar available ---
+# --- ensure @electron/asar available (standalone: use npx if no local) ---
 $AsarBin = Join-Path $RepoRoot "node_modules/@electron/asar/bin/asar.js"
+$UseNpxAsar = $false
 if (-not (Test-Path $AsarBin)) {
-  Write-Host "Installing @electron/asar..." -ForegroundColor Yellow
-  Push-Location $RepoRoot; npm install --no-save @electron/asar 2>&1 | Out-Null; Pop-Location
+  # try npx asar (no repo needed)
+  $UseNpxAsar = $true
+  Write-Host "Using npx @electron/asar (no local install)" -ForegroundColor DarkGray
 }
 
 # --- fetch prebuilt patched files for this Paseo version (from patch repo release) ---
@@ -165,7 +169,7 @@ if (Test-Path $TmpTree) { Move-ToRecycleBin -Path $TmpTree; if (Test-Path $TmpTr
 New-Item -ItemType Directory -Path $TmpTree | Out-Null
 
 Write-Host "Extracting app.asar..." -ForegroundColor DarkGray
-node $AsarBin extract $AppAsar $TmpTree 2>&1 | Out-Null
+if ($UseNpxAsar) { npx --yes @electron/asar extract $AppAsar $TmpTree 2>&1 | Out-Null } else { node $AsarBin extract $AppAsar $TmpTree 2>&1 | Out-Null }
 # copy unpacked content back
 if (Test-Path $AppUnpacked) {
   Write-Host "Merging app.asar.unpacked..." -ForegroundColor DarkGray

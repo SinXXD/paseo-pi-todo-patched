@@ -44,7 +44,9 @@ find_repo_root() {
   for c in "${cands[@]}"; do
     if [[ -f "$c/packages/server/src/server/agent/providers/pi/agent.ts" ]]; then echo "$c"; return 0; fi
   done
-  echo "Cannot locate repo root (tried ${cands[*]}). Use --repo-root." >&2; return 1
+  # standalone mode: no repo needed when fetching from Release, use script dir
+  echo "$script_dir"
+  return 0
 }
 trash_system() {
   local target="$1"
@@ -145,11 +147,12 @@ if [[ -n "$PASEO_VERSION" ]]; then
   fi
 fi
 
-# --- ensure @electron/asar ---
+# --- ensure @electron/asar (standalone: use npx if no local) ---
 ASAR_BIN="$REPO_ROOT/node_modules/@electron/asar/bin/asar.js"
+USE_NPX_ASAR=0
 if [[ ! -f "$ASAR_BIN" ]]; then
-  echo "Installing @electron/asar..."
-  (cd "$REPO_ROOT" && npm install --no-save @electron/asar >/dev/null 2>&1)
+  USE_NPX_ASAR=1
+  echo "Using npx @electron/asar (no local install)"
 fi
 
 # --- use fetched prebuilt (release must exist, no local build fallback) ---
@@ -177,7 +180,11 @@ fi
 TMP_TREE="$(mktemp -d /tmp/paseo-asar-tree.XXXXXX)"
 TMP_OUT="$REPO_ROOT/out-patched.asar"
 echo "Extracting app.asar..."
-node "$ASAR_BIN" extract "$APP_ASAR" "$TMP_TREE" 2>&1 | head -3 || true
+if [[ "$USE_NPX_ASAR" -eq 1 ]]; then
+  npx --yes @electron/asar extract "$APP_ASAR" "$TMP_TREE" 2>&1 | head -3 || true
+else
+  node "$ASAR_BIN" extract "$APP_ASAR" "$TMP_TREE" 2>&1 | head -3 || true
+fi
 echo "Merging app.asar.unpacked..."
 if [[ -d "$APP_UNPACKED" ]]; then
   (cd "$APP_UNPACKED" && tar cf - .) | (cd "$TMP_TREE" && tar xf -)
@@ -191,13 +198,19 @@ echo "Patched files injected"
 SHERPA="$(ls -d "$APP_UNPACKED"/node_modules/sherpa-onnx-* 2>/dev/null | head -1 | xargs -I{} basename {} 2>/dev/null || echo "sherpa-onnx-linux-x64")"
 PAT="{**/node-pty,**/$SHERPA,**/dist/daemon,**/terminal/shell-integration}/**"
 echo "Repacking (unpack: $PAT)..."
-
-# use createPackageWithOptions (handles unpack correctly on Linux)
-node -e "
+if [[ "$USE_NPX_ASAR" -eq 1 ]]; then
+  npx --yes -p @electron/asar node -e "
 const asar=require('@electron/asar');
 const T=process.argv[1], O=process.argv[2], PAT=process.argv[3];
 asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log('repack done')).catch(e=>{console.error(e);process.exit(1)});
 " "$TMP_TREE" "$TMP_OUT" "$PAT"
+else
+  node -e "
+const asar=require('@electron/asar');
+const T=process.argv[1], O=process.argv[2], PAT=process.argv[3];
+asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log('repack done')).catch(e=>{console.error(e);process.exit(1)});
+" "$TMP_TREE" "$TMP_OUT" "$PAT"
+fi
 
 if [[ ! -f "$TMP_OUT" ]]; then echo "Repack failed" >&2; exit 1; fi
 
