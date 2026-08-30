@@ -1,6 +1,6 @@
 # Paseo todo patch - auto-detect & apply (Windows, PowerShell)
 # - Auto-detects conventional Paseo install locations or uses custom path
-# - Uses latest compiled server dist (builds if needed) and repacks app.asar
+# - Fetches prebuilt patch for detected Paseo version from GitHub Release; errors if not found (no local build)
 #
 # Usage (elevated PowerShell):
 #   powershell -ExecutionPolicy Bypass -File patch-paseo.ps1
@@ -97,41 +97,10 @@ if (-not (Test-Path $AsarBin)) {
   Push-Location $RepoRoot; npm install --no-save @electron/asar 2>&1 | Out-Null; Pop-Location
 }
 
-# --- build latest patched server if needed ---
-$AgentSrc = Join-Path $RepoRoot "packages/server/src/server/agent/providers/pi/agent.ts"
-$AgentDist = Join-Path $RepoRoot "packages/server/dist/server/server/agent/providers/pi/agent.js"
-$MapperDist = Join-Path $RepoRoot "packages/server/dist/server/server/agent/providers/pi/tool-call-mapper.js"
-$needsBuild = $false
-if (-not $SkipBuild) {
-  if (-not (Test-Path $AgentDist)) { $needsBuild = $true }
-  elseif (-not (Select-String -Path $AgentDist -Pattern "mapTodoItemsFromToolResult" -Quiet)) { $needsBuild = $true }
-  elseif (-not (Select-String -Path $MapperDist -Pattern "details\.tasks" -Quiet)) { $needsBuild = $true }
-}
-if ($needsBuild) {
-  Write-Host "Building patched server (latest)..." -ForegroundColor Yellow
-  Push-Location $RepoRoot
-  # generate validators first
-  node packages/protocol/scripts/generate-validation-aot.mjs
-  # try npm workspaces, fallback to direct tsc for Windows PATH bug
-  $buildOk = $false
-  try { npm run build --workspace=@getpaseo/server 2>&1 | Out-Null; if (Test-Path $AgentDist) { $buildOk = $true } } catch {}
-  if (-not $buildOk) {
-    Write-Host "npm build failed, falling back to direct tsc..." -ForegroundColor Yellow
-    node node_modules/typescript/bin/tsc -p packages/protocol/tsconfig.json --incremental false
-    node node_modules/typescript/bin/tsc -p packages/highlight/tsconfig.json --incremental false
-    node node_modules/typescript/bin/tsc -p packages/relay/tsconfig.json --incremental false
-    node node_modules/typescript/bin/tsc -p packages/client/tsconfig.json --incremental false
-    node node_modules/typescript/bin/tsc -p packages/plugin/tsconfig.json --incremental false
-    node node_modules/typescript/bin/tsc -p packages/server/tsconfig.server.json --incremental false
-  }
-  Pop-Location
-  if (-not (Test-Path $AgentDist)) { throw "Build failed: $AgentDist not found" }
-  Write-Host "Build OK" -ForegroundColor Green
-} else {
-  Write-Host "Using existing dist (skip build)" -ForegroundColor DarkGray
-}
-
-# --- try to fetch prebuilt patched files for this Paseo version (from patch repo release) ---
+# --- fetch prebuilt patched files for this Paseo version (from patch repo release) ---
+# Simple: release exists -> use it, no release -> error (no local build fallback)
+$AgentDist = $null
+$MapperDist = $null
 $PaseoVersion = $null
 try {
   $escAppAsar = $AppAsar -replace "'", "''"
@@ -153,9 +122,8 @@ if ($PaseoVersion) {
   $baseUrl = "https://github.com/SinXXD/paseo-pi-todo-patched/releases/download/$releaseTag"
   $tmpAgent = Join-Path $env:TEMP "paseo-patched-agent-$normVer.js"
   $tmpMapper = Join-Path $env:TEMP "paseo-patched-mapper-$normVer.js"
-  $fetched = $false
   try {
-    Write-Host "Trying to fetch prebuilt patch $releaseTag from GitHub..." -ForegroundColor DarkGray
+    Write-Host "Fetching prebuilt patch $releaseTag from GitHub..." -ForegroundColor DarkGray
     $gh = Get-Command gh -ErrorAction SilentlyContinue
     if ($gh) {
       & gh release download $releaseTag --repo SinXXD/paseo-pi-todo-patched --pattern "agent.js" --dir $env:TEMP --clobber 2>&1 | Out-Null
@@ -167,17 +135,15 @@ if ($PaseoVersion) {
       Invoke-WebRequest -Uri "$baseUrl/agent.js" -OutFile $tmpAgent -UseBasicParsing -ErrorAction Stop
       Invoke-WebRequest -Uri "$baseUrl/tool-call-mapper.js" -OutFile $tmpMapper -UseBasicParsing -ErrorAction Stop
     }
-    if ((Test-Path $tmpAgent) -and (Test-Path $tmpMapper)) {
-      Write-Host "Fetched prebuilt patch for v$normVer ($releaseTag)" -ForegroundColor Green
-      $AgentDist = $tmpAgent
-      $MapperDist = $tmpMapper
-    } else { throw "download incomplete" }
-    $fetched = $true
+    if (-not ((Test-Path $tmpAgent) -and (Test-Path $tmpMapper))) { throw "download incomplete" }
+    Write-Host "Fetched prebuilt patch for v$normVer ($releaseTag)" -ForegroundColor Green
+    $AgentDist = $tmpAgent
+    $MapperDist = $tmpMapper
   } catch {
-    Write-Host "No prebuilt release for v$normVer ($releaseTag), will use local build. ($($_.Exception.Message))" -ForegroundColor Yellow
+    throw "No prebuilt release for v$normVer ($releaseTag). Please wait for the patch repo to publish patched-$normVer or build manually. Error: $($_.Exception.Message)"
   }
 } else {
-  Write-Host "Could not detect Paseo version, using local build" -ForegroundColor Yellow
+  throw "Could not detect Paseo version. Use -PaseoResources or ensure app.asar is readable."
 }
 
 # --- Paseo running check ---

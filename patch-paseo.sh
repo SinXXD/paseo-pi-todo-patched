@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Paseo todo patch - auto-detect & apply (Linux/macOS, bash)
 # - Auto-detects conventional Paseo install locations or uses custom path
-# - Uses latest compiled server dist (builds if needed) and repacks app.asar
+# - Fetches prebuilt patch for detected Paseo version from GitHub Release; errors if not found (no local build)
 #
 # Usage:
 #   bash patch-paseo.sh
@@ -141,7 +141,7 @@ if [[ -n "$PASEO_VERSION" ]]; then
     FETCHED_AGENT="$TMP_AGENT"
     FETCHED_MAPPER="$TMP_MAPPER"
   else
-    echo "No prebuilt release for v$NORM_VER ($RELEASE_TAG), will build locally"
+    echo "No prebuilt release for v$NORM_VER ($RELEASE_TAG)" >&2
   fi
 fi
 
@@ -152,38 +152,14 @@ if [[ ! -f "$ASAR_BIN" ]]; then
   (cd "$REPO_ROOT" && npm install --no-save @electron/asar >/dev/null 2>&1)
 fi
 
-# --- build latest patched server if needed ---
-AGENT_DIST="$REPO_ROOT/packages/server/dist/server/server/agent/providers/pi/agent.js"
-MAPPER_DIST="$REPO_ROOT/packages/server/dist/server/server/agent/providers/pi/tool-call-mapper.js"
-needs_build=0
-if [[ "$SKIP_BUILD" -eq 0 ]]; then
-  if [[ ! -f "$AGENT_DIST" ]]; then needs_build=1
-  elif ! grep -q "mapTodoItemsFromToolResult" "$AGENT_DIST" 2>/dev/null; then needs_build=1
-  elif ! grep -q "details.tasks" "$MAPPER_DIST" 2>/dev/null; then needs_build=1
-  fi
+# --- use fetched prebuilt (release must exist, no local build fallback) ---
+if [[ -z "${FETCHED_AGENT:-}" || ! -f "${FETCHED_AGENT:-}" || -z "${FETCHED_MAPPER:-}" || ! -f "${FETCHED_MAPPER:-}" ]]; then
+  echo "No prebuilt release for v${NORM_VER:-unknown} ($RELEASE_TAG). Please wait for the patch repo to publish patched-${NORM_VER:-unknown}." >&2
+  exit 1
 fi
-# if we fetched prebuilt for detected version, override dist paths
-if [[ -n "${FETCHED_AGENT:-}" && -f "${FETCHED_AGENT:-}" ]]; then
-  AGENT_DIST="$FETCHED_AGENT"
-  MAPPER_DIST="$FETCHED_MAPPER"
-  echo "Using fetched prebuilt files for v$NORM_VER: $AGENT_DIST"
-fi
-
-if [[ "$needs_build" -eq 1 ]]; then
-  echo "Building patched server (latest)..."
-  (cd "$REPO_ROOT" && node packages/protocol/scripts/generate-validation-aot.mjs)
-  (cd "$REPO_ROOT" && npm ci 2>&1 | tail -5)
-  (cd "$REPO_ROOT" && npm run build --workspace=@getpaseo/protocol 2>&1 | tail -3)
-  (cd "$REPO_ROOT" && npm run build --workspace=@getpaseo/highlight 2>&1 | tail -3)
-  (cd "$REPO_ROOT" && npm run build --workspace=@getpaseo/relay 2>&1 | tail -3)
-  (cd "$REPO_ROOT" && npm run build --workspace=@getpaseo/client 2>&1 | tail -3)
-  (cd "$REPO_ROOT" && npm run build --workspace=@getpaseo/plugin 2>&1 | tail -3 || npx tsc -p packages/plugin/tsconfig.json --incremental false)
-  (cd "$REPO_ROOT" && npm run build --workspace=@getpaseo/server 2>&1 | tail -3)
-  if [[ ! -f "$AGENT_DIST" ]]; then echo "Build failed: $AGENT_DIST not found" >&2; exit 1; fi
-  echo "Build OK"
-else
-  echo "Using existing dist (skip build)"
-fi
+AGENT_DIST="$FETCHED_AGENT"
+MAPPER_DIST="$FETCHED_MAPPER"
+echo "Using prebuilt patch for v$NORM_VER: $AGENT_DIST"
 
 # --- Paseo running check ---
 if pgrep -x "Paseo" >/dev/null 2>&1 || pgrep -f "Paseo" >/dev/null 2>&1; then
