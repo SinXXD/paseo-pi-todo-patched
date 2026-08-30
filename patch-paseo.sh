@@ -95,6 +95,56 @@ APP_ASAR="$RESOURCES/app.asar"
 APP_UNPACKED="$RESOURCES/app.asar.unpacked"
 BACKUP_DIR="$REPO_ROOT/paseo-asar-backup"
 
+# --- try to fetch prebuilt patched files for this Paseo version (from patch repo release) ---
+PASEO_VERSION=""
+if command -v node >/dev/null 2>&1 && [[ -f "$APP_ASAR" ]]; then
+  # ASAR_BIN may not yet be defined, use npx fallback
+  PASEO_VERSION=$(node -e "try{const a=require('$REPO_ROOT/node_modules/@electron/asar'); const d=a.extractFile('$APP_ASAR','package.json'); console.log(JSON.parse(d.toString()).version)}catch(e){try{const a=require('@electron/asar'); const d=a.extractFile('$APP_ASAR','package.json'); console.log(JSON.parse(d.toString()).version)}catch(e2){}}" 2>/dev/null | tr -d '\r\n' | xargs)
+fi
+if [[ -z "$PASEO_VERSION" ]]; then
+  # try Paseo binary --version (Linux)
+  PASEO_BIN="$(dirname "$RESOURCES")/Paseo"
+  [[ -x "$PASEO_BIN" ]] && PASEO_VERSION=$("$PASEO_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+fi
+if [[ -n "$PASEO_VERSION" ]]; then
+  NORM_VER=${PASEO_VERSION#v}
+  echo "Detected Paseo version: $NORM_VER"
+  RELEASE_TAG="patched-v$NORM_VER"
+  BASE_URL="https://github.com/SinXXD/paseo-pi-todo-patched/releases/download/$RELEASE_TAG"
+  TMP_AGENT="/tmp/paseo-patched-agent-$NORM_VER.js"
+  TMP_MAPPER="/tmp/paseo-patched-mapper-$NORM_VER.js"
+  FETCHED=0
+  if command -v gh >/dev/null 2>&1; then
+    if gh release download "$RELEASE_TAG" --repo SinXXD/paseo-pi-todo-patched --pattern "agent.js" --dir /tmp --clobber 2>/dev/null && \
+       gh release download "$RELEASE_TAG" --repo SinXXD/paseo-pi-todo-patched --pattern "tool-call-mapper.js" --dir /tmp --clobber 2>/dev/null; then
+      [[ -f /tmp/agent.js ]] && mv -f /tmp/agent.js "$TMP_AGENT" 2>/dev/null
+      [[ -f /tmp/tool-call-mapper.js ]] && mv -f /tmp/tool-call-mapper.js "$TMP_MAPPER" 2>/dev/null
+      if [[ -f "$TMP_AGENT" && -f "$TMP_MAPPER" ]]; then
+        echo "Fetched prebuilt patch for v$NORM_VER ($RELEASE_TAG) via gh"
+        FETCHED=1
+      fi
+    fi
+  fi
+  if [[ "$FETCHED" -eq 0 ]] && command -v curl >/dev/null 2>&1; then
+    if curl -fsSL "$BASE_URL/agent.js" -o "$TMP_AGENT" 2>/dev/null && curl -fsSL "$BASE_URL/tool-call-mapper.js" -o "$TMP_MAPPER" 2>/dev/null; then
+      echo "Fetched prebuilt patch for v$NORM_VER ($RELEASE_TAG) via curl"
+      FETCHED=1
+    fi
+  fi
+  if [[ "$FETCHED" -eq 1 && -f "$TMP_AGENT" && -f "$TMP_MAPPER" ]]; then
+    # override dist paths to use fetched files, skip local build
+    AGENT_DIST_FETCHED="$TMP_AGENT"
+    MAPPER_DIST_FETCHED="$TMP_MAPPER"
+    # will be used below; mark to skip build
+    SKIP_BUILD=1
+    # defer assignment until after build check
+    FETCHED_AGENT="$TMP_AGENT"
+    FETCHED_MAPPER="$TMP_MAPPER"
+  else
+    echo "No prebuilt release for v$NORM_VER ($RELEASE_TAG), will build locally"
+  fi
+fi
+
 # --- ensure @electron/asar ---
 ASAR_BIN="$REPO_ROOT/node_modules/@electron/asar/bin/asar.js"
 if [[ ! -f "$ASAR_BIN" ]]; then
@@ -112,6 +162,13 @@ if [[ "$SKIP_BUILD" -eq 0 ]]; then
   elif ! grep -q "details.tasks" "$MAPPER_DIST" 2>/dev/null; then needs_build=1
   fi
 fi
+# if we fetched prebuilt for detected version, override dist paths
+if [[ -n "${FETCHED_AGENT:-}" && -f "${FETCHED_AGENT:-}" ]]; then
+  AGENT_DIST="$FETCHED_AGENT"
+  MAPPER_DIST="$FETCHED_MAPPER"
+  echo "Using fetched prebuilt files for v$NORM_VER: $AGENT_DIST"
+fi
+
 if [[ "$needs_build" -eq 1 ]]; then
   echo "Building patched server (latest)..."
   (cd "$REPO_ROOT" && node packages/protocol/scripts/generate-validation-aot.mjs)
