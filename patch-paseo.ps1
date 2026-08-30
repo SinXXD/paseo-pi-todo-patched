@@ -208,12 +208,36 @@ $sherpaPat = if ($sherpa) { $sherpa.Name } else { "sherpa-onnx-win-x64" }
 $Pat = "{**/node-pty,**/$sherpaPat,**/dist/daemon,**/terminal/shell-integration}/**"
 Write-Host "Repacking (unpack: $Pat)..." -ForegroundColor DarkGray
 
-# swap.mjs wrapper handles Windows backslash + dot-dir
-$SwapMjs = Join-Path $RepoRoot "swap.mjs"
-if (-not (Test-Path $SwapMjs)) {
-  # create minimal wrapper inline if missing
-  $SwapMjs = Join-Path $env:TEMP "paseo-swap-$(Get-Random).mjs"
+# repack with Windows backslash+dot-dir wrapper
+if ($UseNpxAsar) {
+  # standalone: run wrapper via npx -p so @electron/asar is resolvable in temp file
+  $Wrapper = Join-Path $env:TEMP "paseo-swap-$(Get-Random).mjs"
   @'
+import {createRequire} from "node:module";
+const require=createRequire(import.meta.url);
+// npx -p makes asar resolvable from this temp file via NODE_PATH
+const mmPath=require.resolve("minimatch",{paths:[process.env.NODE_PATH || ""]});
+let rawMM; try{ rawMM=require(mmPath) }catch{ rawMM=require("minimatch") }
+const wrapped=(f,p,o)=>rawMM(String(f).replace(/\\/g,"/"),p,o);
+for(const k of Object.keys(rawMM)) wrapped[k]=rawMM[k];
+// patch the nested minimatch that @electron/asar will use
+try{
+  const asarPkg=require.resolve("@electron/asar/package.json");
+  const asarDir=require("node:path").dirname(asarPkg);
+  const nestedMm=require.resolve("minimatch",{paths:[asarDir]});
+  require.cache[nestedMm].exports=wrapped;
+} catch{}
+try{ require.cache[require.resolve("minimatch")].exports=wrapped }catch{}
+const asar=require("@electron/asar");
+const T=process.argv[2],O=process.argv[3],PAT=process.argv[4]||"{**/node-pty,**/sherpa-onnx-win-x64,**/dist/daemon,**/terminal/shell-integration}/**";
+asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log("repack done")).catch(e=>{console.error(e);process.exit(1)});
+'@ | Set-Content -Path $Wrapper -Encoding UTF8
+  npx --yes -p @electron/asar node "$Wrapper" "$TmpTree" "$TmpOut" "$Pat"
+} else {
+  $SwapMjs = Join-Path $RepoRoot "swap.mjs"
+  if (-not (Test-Path $SwapMjs)) {
+    $SwapMjs = Join-Path $env:TEMP "paseo-swap-$(Get-Random).mjs"
+    @'
 import {createRequire} from "node:module"; import {dirname,resolve} from "node:path";
 const require=createRequire(import.meta.url);
 const asarPkgDir=dirname(require.resolve("@electron/asar/package.json"));
@@ -224,9 +248,9 @@ const asar=require("@electron/asar"); const T=process.argv[2],O=process.argv[3];
 const PAT=process.argv[4]||"{**/node-pty,**/sherpa-onnx-win-x64,**/dist/daemon,**/terminal/shell-integration}/**";
 asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log("repack done")).catch(e=>{console.error(e);process.exit(1)});
 '@ | Set-Content -Path $SwapMjs -Encoding UTF8
+  }
+  node "$SwapMjs" "$TmpTree" "$TmpOut" "$Pat"
 }
-if ($UseNpxAsar) { npx --yes -p @electron/asar node "$SwapMjs" "$TmpTree" "$TmpOut" "$Pat" }
-else { node "$SwapMjs" "$TmpTree" "$TmpOut" "$Pat" }
 if (-not (Test-Path $TmpOut)) { throw "Repack failed: $TmpOut not created" }
 if (-not (Test-Path "$TmpOut.unpacked")) { Write-Host "Note: unpacked dir not created (check PAT)" -ForegroundColor Yellow }
 
