@@ -158,14 +158,14 @@ if ($procs.Count -gt 0 -and -not $Force) {
 }
 
 # --- write permission check ---
-try { $probe = Join-Path $Resources "__write_probe.tmp"; Set-Content -Path $probe -Value ok -ErrorAction Stop; Move-ToRecycleBin -Path $probe; if (Test-Path $probe) { Remove-Item $probe -Force -ErrorAction SilentlyContinue }; Write-Host "resources writable" -ForegroundColor DarkGray } catch {
+try { $probe = Join-Path $Resources "__write_probe.tmp"; Set-Content -Path $probe -Value ok -ErrorAction Stop; Move-ToRecycleBin -Path $probe; if (Test-Path $probe) { throw "Move-ToRecycleBin failed for probe" }; Write-Host "resources writable" -ForegroundColor DarkGray } catch {
   Write-Host "No write permission for $Resources - run as administrator." -ForegroundColor Red; exit 1
 }
 
 # --- prepare temp tree ---
 $TmpTree = Join-Path $env:TEMP "paseo-asar-tree-$(Get-Random)"
 $TmpOut = Join-Path $RepoRoot "out-patched.asar"
-if (Test-Path $TmpTree) { Move-ToRecycleBin -Path $TmpTree; if (Test-Path $TmpTree) { Remove-Item $TmpTree -Recurse -Force -ErrorAction SilentlyContinue } }
+if (Test-Path $TmpTree) { Move-ToRecycleBin -Path $TmpTree; if (Test-Path $TmpTree) { throw "Failed to move $TmpTree to recycle bin" } }
 New-Item -ItemType Directory -Path $TmpTree | Out-Null
 
 Write-Host "Extracting app.asar..." -ForegroundColor DarkGray
@@ -197,8 +197,8 @@ if (Test-Path $AppUnpacked) {
 # overwrite patched files
 $TargetDir = Join-Path $TmpTree "node_modules/@getpaseo/server/dist/server/server/agent/providers/pi"
 New-Item -ItemType Directory -Path $TargetDir -Force | Out-Null
-Copy-Item $AgentDist  -Destination $TargetDir -Force
-Copy-Item $MapperDist -Destination $TargetDir -Force
+Copy-Item $AgentDist  -Destination (Join-Path $TargetDir "agent.js") -Force
+Copy-Item $MapperDist -Destination (Join-Path $TargetDir "tool-call-mapper.js") -Force
 Write-Host "Patched files injected"
 
 # --- repack with Windows-compatible wrapper ---
@@ -231,7 +231,7 @@ asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log("repack don
   node swap.js "$TmpTree" "$TmpOut" "$Pat"
   $repackExit = $LASTEXITCODE
   Pop-Location
-  Move-ToRecycleBin -Path $workDir; if (Test-Path $workDir) { Remove-Item $workDir -Recurse -Force -ErrorAction SilentlyContinue }
+  Move-ToRecycleBin -Path $workDir; if (Test-Path $workDir) { throw "Failed to move $workDir to recycle bin" }
   if ($repackExit -ne 0) { throw "Repack failed" }
 } else {
   $SwapMjs = Join-Path $RepoRoot "swap.mjs"
@@ -260,13 +260,13 @@ $bakAsar = Join-Path $BackupDir "app.asar"
 if ((Test-Path $bakAsar) -and -not $RedoBackup) {
   Write-Host "Backup exists, skipping (use -RedoBackup to redo)" -ForegroundColor Yellow
 } else {
-  if (Test-Path $BackupDir) { Move-ToRecycleBin -Path $BackupDir; if (Test-Path $BackupDir) { Remove-Item $BackupDir -Recurse -Force -ErrorAction SilentlyContinue }; New-Item -ItemType Directory -Path $BackupDir | Out-Null }
+  if (Test-Path $BackupDir) { Move-ToRecycleBin -Path $BackupDir; if (Test-Path $BackupDir) { throw "Failed to move $BackupDir to recycle bin" }; New-Item -ItemType Directory -Path $BackupDir | Out-Null }
   Copy-Item $AppAsar -Destination $BackupDir
   Copy-Item $AppUnpacked -Destination $BackupDir -Recurse
   Write-Host "Backup -> $BackupDir"
 }
 Copy-Item $TmpOut -Destination $AppAsar -Force
-if (Test-Path $AppUnpacked) { Move-ToRecycleBin -Path $AppUnpacked; if (Test-Path $AppUnpacked) { Remove-Item $AppUnpacked -Recurse -Force -ErrorAction SilentlyContinue } }
+if (Test-Path $AppUnpacked) { Move-ToRecycleBin -Path $AppUnpacked; if (Test-Path $AppUnpacked) { throw "Failed to move $AppUnpacked to recycle bin" } }
 Copy-Item "$TmpOut.unpacked" -Destination $AppUnpacked -Recurse
 Write-Host "Deployed -> $Resources" -ForegroundColor Green
 
@@ -274,9 +274,9 @@ Write-Host "Deployed -> $Resources" -ForegroundColor Green
 $h1=(Get-FileHash $AppAsar -Algorithm SHA256).Hash; $h2=(Get-FileHash $TmpOut -Algorithm SHA256).Hash
 if ($h1 -eq $h2) { Write-Host "Verified (hash match)" -ForegroundColor Green } else { Write-Host "Warning: hash mismatch" -ForegroundColor Red }
 
-Move-ToRecycleBin -Path $TmpTree; if (Test-Path $TmpTree) { Remove-Item $TmpTree -Recurse -Force -ErrorAction SilentlyContinue }
+Move-ToRecycleBin -Path $TmpTree; if (Test-Path $TmpTree) { throw "Failed to move $TmpTree to recycle bin" }
 # cleanup repacked temp outputs
-if (Test-Path $TmpOut) { Move-ToRecycleBin -Path $TmpOut; if (Test-Path $TmpOut) { Remove-Item $TmpOut -Force -ErrorAction SilentlyContinue } }
-if (Test-Path "$TmpOut.unpacked") { Move-ToRecycleBin -Path "$TmpOut.unpacked"; if (Test-Path "$TmpOut.unpacked") { Remove-Item "$TmpOut.unpacked" -Recurse -Force -ErrorAction SilentlyContinue } }
+if (Test-Path $TmpOut) { Move-ToRecycleBin -Path $TmpOut; if (Test-Path $TmpOut) { throw "Failed to move $TmpOut to recycle bin" } }
+if (Test-Path "$TmpOut.unpacked") { Move-ToRecycleBin -Path "$TmpOut.unpacked"; if (Test-Path "$TmpOut.unpacked") { throw "Failed to move $TmpOut.unpacked to recycle bin" } }
 Write-Host "Done. Restart Paseo and test pi todo." -ForegroundColor Green
 Write-Host "Rollback: powershell -ExecutionPolicy Bypass -File $RepoRoot/restore.ps1" -ForegroundColor DarkGray

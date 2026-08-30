@@ -191,7 +191,8 @@ if [[ -d "$APP_UNPACKED" ]]; then
 fi
 TARGET_DIR="$TMP_TREE/node_modules/@getpaseo/server/dist/server/server/agent/providers/pi"
 mkdir -p "$TARGET_DIR"
-cp -f "$AGENT_DIST" "$MAPPER_DIST" "$TARGET_DIR/"
+cp -f "$AGENT_DIST" "$TARGET_DIR/agent.js"
+cp -f "$MAPPER_DIST" "$TARGET_DIR/tool-call-mapper.js"
 echo "Patched files injected"
 
 # --- repack with platform-appropriate unpack ---
