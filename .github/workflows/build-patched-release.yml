@@ -55,13 +55,12 @@ jobs:
           TAG="${{ steps.release_tag.outputs.checkout_tag }}"
           echo "Checking out $TAG"
           git checkout -B "patched-$TAG" "$TAG" 2>&1 | head -5
-          echo "Applying pi-todo patch"
-          if [[ -f patches/pi-todo.patch ]]; then
-            git apply patches/pi-todo.patch && echo "Patch applied"
-          else
-            echo "Patch file not found, cherry-picking from main"
-            git cherry-pick origin/main --no-commit 2>&1 | head -20 || true
+          echo "Applying pi-todo patch (from main tree, tag-independent)"
+          if ! git show origin/main:patches/pi-todo.patch | git apply 2>&1 | head -20; then
+            echo "ERROR: patch apply failed (upstream refactor or conflict). Manual intervention required." >&2
+            exit 1
           fi
+          echo "Patch applied"
           git status --short | head -20
 
       - name: Setup Node
