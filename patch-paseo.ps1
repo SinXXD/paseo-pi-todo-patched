@@ -205,7 +205,7 @@ Write-Host "Patched files injected"
 # auto-detect sherpa variant from unpacked
 $sherpa = Get-ChildItem (Join-Path $AppUnpacked "node_modules") -Filter "sherpa-onnx-*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
 $sherpaPat = if ($sherpa) { $sherpa.Name } else { "sherpa-onnx-win-x64" }
-$Pat = "{**/node-pty,**/$sherpaPat,**/dist/daemon,**/terminal/shell-integration}/**"
+$Pat = "{**/node-pty,**/$sherpaPat,**/terminal/shell-integration}/**"
 Write-Host "Repacking (unpack: $Pat)..." -ForegroundColor DarkGray
 
 # repack with Windows backslash+dot-dir wrapper
@@ -245,7 +245,7 @@ const mmPath=resolve(require.resolve("minimatch",{paths:[asarPkgDir]}));
 const rawMM=require(mmPath); const wrapped=(f,p,o)=>rawMM(String(f).replace(/\\/g,"/"),p,o);
 for(const k of Object.keys(rawMM)) wrapped[k]=rawMM[k]; require.cache[mmPath].exports=wrapped;
 const asar=require("@electron/asar"); const T=process.argv[2],O=process.argv[3];
-const PAT=process.argv[4]||"{**/node-pty,**/sherpa-onnx-win-x64,**/dist/daemon,**/terminal/shell-integration}/**";
+const PAT=process.argv[4]||"{**/node-pty,**/sherpa-onnx-win-x64,**/terminal/shell-integration}/**";
 asar.createPackageWithOptions(T,O,{unpack:PAT}).then(()=>console.log("repack done")).catch(e=>{console.error(e);process.exit(1)});
 '@ | Set-Content -Path $SwapMjs -Encoding UTF8
   }

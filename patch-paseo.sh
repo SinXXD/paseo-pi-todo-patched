@@ -197,7 +197,7 @@ echo "Patched files injected"
 
 # --- repack with platform-appropriate unpack ---
 SHERPA="$(ls -d "$APP_UNPACKED"/node_modules/sherpa-onnx-* 2>/dev/null | head -1 | xargs -I{} basename {} 2>/dev/null || echo "sherpa-onnx-linux-x64")"
-PAT="{**/node-pty,**/$SHERPA,**/dist/daemon,**/terminal/shell-integration}/**"
+PAT="{**/node-pty,**/$SHERPA,**/terminal/shell-integration}/**"
 echo "Repacking (unpack: $PAT)..."
 if [[ "$USE_NPX_ASAR" -eq 1 ]]; then
   # bulletproof local install in temp dir (immune to nvm/fnm/volta)
